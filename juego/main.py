@@ -225,6 +225,12 @@ class SudokuGame:
         self.message_color = WHITE
         self.message_until = 0.0
 
+        # En navegadores móviles, un toque puede producir FINGERDOWN y luego
+        # un MOUSEBUTTONDOWN sintético. Guardamos el momento del último toque
+        # para impedir que una pulsación numérica se procese dos veces.
+        self.last_touch_time = -10.0
+        self.touch_mouse_block_seconds = 0.55
+
         self.difficulty_buttons = [
             Button((92, 430, 356, 82), "FACIL"),
             Button((92, 535, 356, 82), "MEDIO"),
@@ -635,17 +641,12 @@ class SudokuGame:
         if event.type == pygame.KEYDOWN:
             self.handle_key(event)
 
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.state in ("won", "lost"):
-                if hasattr(self, "overlay_new_button") and self.overlay_new_button.contains(event.pos):
-                    self.start_game(self.difficulty)
-                elif hasattr(self, "overlay_menu_button") and self.overlay_menu_button.contains(event.pos):
-                    self.state = "menu"
-            else:
-                self.handle_press(event.pos)
-
         if event.type == pygame.FINGERDOWN:
+            # Procesamos primero el toque real y bloqueamos el evento de mouse
+            # sintético que algunos navegadores Android envían inmediatamente.
+            self.last_touch_time = time.monotonic()
             pos = (event.x * WIDTH, event.y * HEIGHT)
+
             if self.state in ("won", "lost"):
                 if hasattr(self, "overlay_new_button") and self.overlay_new_button.contains(pos):
                     self.start_game(self.difficulty)
@@ -653,6 +654,22 @@ class SudokuGame:
                     self.state = "menu"
             else:
                 self.handle_press(pos)
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            seconds_since_touch = time.monotonic() - self.last_touch_time
+            generated_by_touch = bool(getattr(event, "touch", False))
+
+            # No volver a procesar el mismo toque como clic de mouse.
+            if generated_by_touch or seconds_since_touch < self.touch_mouse_block_seconds:
+                return True
+
+            if self.state in ("won", "lost"):
+                if hasattr(self, "overlay_new_button") and self.overlay_new_button.contains(event.pos):
+                    self.start_game(self.difficulty)
+                elif hasattr(self, "overlay_menu_button") and self.overlay_menu_button.contains(event.pos):
+                    self.state = "menu"
+            else:
+                self.handle_press(event.pos)
 
         return True
 

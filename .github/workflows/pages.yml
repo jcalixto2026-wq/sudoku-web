@@ -1,17 +1,19 @@
-name: Publicar videojuego en GitHub Pages
+﻿name: Publicar Sudoku en GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -19,31 +21,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar el repositorio
+      - name: Descargar repositorio
         uses: actions/checkout@v6
 
       - name: Instalar Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
 
-      - name: Instalar Pygbag
+      - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Construir versión web
+      - name: Construir Sudoku web
         run: |
-          python -m pygbag --build --ume_block 0 --can_close 1 .
+          python -m pygbag --build --ume_block 0 --can_close 1 ./juego
 
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Subir archivos del sitio
-        uses: actions/upload-pages-artifact@v4
+      - name: Subir archivos del juego
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: build/web
+          path: juego/build/web
 
   deploy:
     environment:
@@ -55,4 +57,4 @@ jobs:
     steps:
       - name: Publicar
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

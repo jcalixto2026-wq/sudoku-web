@@ -4,6 +4,9 @@ import random
 import time
 import pygame
 
+# Semilla distinta en cada carga del juego.
+random.seed(time.time_ns() ^ time.perf_counter_ns())
+
 WIDTH = 540
 HEIGHT = 960
 FPS = 60
@@ -120,6 +123,21 @@ PUZZLES = {
     ],
 }
 
+SOLUTIONS = {
+    "Facil": [
+        "534678912672195348198342567859761423426853791713924856961537284287419635345286179",
+        "245981376169273584837564219976125438513498627482736951391657842728349165654812793",
+    ],
+    "Medio": [
+        "435269781682571493197834562826195347374682915951743628519326874248957136763418259",
+        "987654321246173985351928746128537694634892157795461832519286473472319568863745219",
+    ],
+    "Dificil": [
+        "462831957795426183381795426173984265659312748248567319926178534834259671517643892",
+        "145327698839654127672918543496185372218473956753296481367542819984761235521839764",
+    ],
+}
+
 
 def draw_gradient(surface, top_color, bottom_color):
     for y in range(HEIGHT):
@@ -148,6 +166,70 @@ def string_to_board(puzzle):
         [int(puzzle[row * 9 + col]) for col in range(9)]
         for row in range(9)
     ]
+
+
+def shuffled_sudoku_indices():
+    """Mezcla bandas/pilas y filas/columnas dentro de cada grupo."""
+    groups = [0, 1, 2]
+    random.shuffle(groups)
+
+    indices = []
+    for group in groups:
+        inside = [0, 1, 2]
+        random.shuffle(inside)
+        indices.extend(group * 3 + position for position in inside)
+
+    return indices
+
+
+def transform_board(board, row_order, col_order, transpose, flip_rows, flip_cols, digit_map):
+    transformed = [[board[row][col] for col in col_order] for row in row_order]
+
+    if transpose:
+        transformed = [list(row) for row in zip(*transformed)]
+
+    if flip_rows:
+        transformed.reverse()
+
+    if flip_cols:
+        transformed = [list(reversed(row)) for row in transformed]
+
+    return [
+        [digit_map[value] if value != 0 else 0 for value in row]
+        for row in transformed
+    ]
+
+
+def create_random_variant(puzzle_text, solution_text):
+    """
+    Genera una variante válida y distinta manteniendo la misma solución:
+    cambia bandas, pilas, filas, columnas, orientación y símbolos 1-9.
+    """
+    puzzle = string_to_board(puzzle_text)
+    solution = string_to_board(solution_text)
+
+    row_order = shuffled_sudoku_indices()
+    col_order = shuffled_sudoku_indices()
+    transpose = random.choice((True, False))
+    flip_rows = random.choice((True, False))
+    flip_cols = random.choice((True, False))
+
+    shuffled_digits = list(range(1, 10))
+    random.shuffle(shuffled_digits)
+    digit_map = {old: new for old, new in zip(range(1, 10), shuffled_digits)}
+
+    transformed_puzzle = transform_board(
+        puzzle, row_order, col_order, transpose, flip_rows, flip_cols, digit_map
+    )
+    transformed_solution = transform_board(
+        solution, row_order, col_order, transpose, flip_rows, flip_cols, digit_map
+    )
+
+    return transformed_puzzle, transformed_solution
+
+
+def board_signature(board):
+    return "".join(str(value) for row in board for value in row)
 
 
 def find_empty(board):
@@ -230,6 +312,7 @@ class SudokuGame:
         # para impedir que una pulsación numérica se procese dos veces.
         self.last_touch_time = -10.0
         self.touch_mouse_block_seconds = 0.55
+        self.last_puzzle_signature = None
 
         self.difficulty_buttons = [
             Button((92, 430, 356, 82), "FACIL"),
@@ -238,10 +321,13 @@ class SudokuGame:
         ]
 
         self.number_buttons = []
-        button_size = 68
-        gap = 12
+
+        # Diseño móvil: la fila 7-8-9 termina en y=860 y los controles
+        # inferiores comienzan en y=880, por lo que ya no se superponen.
+        button_size = 58
+        gap = 10
         start_x = (WIDTH - (button_size * 3 + gap * 2)) // 2
-        start_y = 696
+        start_y = 666
 
         number = 1
         for row in range(3):
@@ -253,21 +339,33 @@ class SudokuGame:
                 )
                 number += 1
 
-        self.erase_button = Button((24, 882, 150, 54), "BORRAR", FONT_BODY)
-        self.new_button = Button((190, 882, 156, 54), "NUEVO", FONT_BODY)
-        self.menu_button = Button((362, 882, 154, 54), "MENU", FONT_BODY)
+        self.erase_button = Button((24, 880, 150, 50), "BORRAR", FONT_BODY)
+        self.new_button = Button((190, 880, 156, 50), "NUEVO", FONT_BODY)
+        self.menu_button = Button((362, 880, 154, 50), "MENU", FONT_BODY)
 
     def start_game(self, difficulty):
         self.difficulty = difficulty
-        puzzle_text = random.choice(PUZZLES[difficulty])
-        self.original = string_to_board(puzzle_text)
-        self.board = copy.deepcopy(self.original)
-        self.solution = copy.deepcopy(self.original)
 
-        if not solve_board(self.solution):
-            self.show_message("No se pudo preparar el tablero", RED, 3.0)
-            self.state = "menu"
-            return
+        candidate_puzzle = None
+        candidate_solution = None
+        signature = None
+
+        # Reintenta para garantizar que NUEVO no repita la partida anterior.
+        for _ in range(30):
+            index = random.randrange(len(PUZZLES[difficulty]))
+            candidate_puzzle, candidate_solution = create_random_variant(
+                PUZZLES[difficulty][index],
+                SOLUTIONS[difficulty][index],
+            )
+            signature = board_signature(candidate_puzzle)
+
+            if signature != self.last_puzzle_signature:
+                break
+
+        self.last_puzzle_signature = signature
+        self.original = candidate_puzzle
+        self.board = copy.deepcopy(self.original)
+        self.solution = candidate_solution
 
         self.selected = self.find_first_empty()
         self.mistakes = 0
@@ -524,7 +622,7 @@ class SudokuGame:
                 self.message,
                 FONT_SMALL,
                 self.message_color,
-                (WIDTH // 2, 660),
+                (WIDTH // 2, 650),
             )
 
     def draw_number_pad(self, surface):
